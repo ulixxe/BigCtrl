@@ -144,13 +144,13 @@ int event_remapped_key_down(struct Remap * remap, DWORD time)
     } else if (remap->state == TAPPED) {
         if ((g_doublepress_timeout > 0) && (time - remap->time < g_doublepress_timeout)) {
             remap->state = TAP;
-            return 0;
+            send_key_def_input(remap->to_when_alone, DOWN);
         } else {
             remap->time = time;
             remap->state = HELD_DOWN_ALONE;
         }
     } else if (remap->state == TAP) {
-        return 0;
+        send_key_def_input(remap->to_when_alone, DOWN);
     }
     return 1;
 }
@@ -174,7 +174,7 @@ int event_remapped_key_up(struct Remap * remap, DWORD time)
     } else if (remap->state == TAP) {
         remap->time = time;
         remap->state = TAPPED;
-        return 0;
+        send_key_def_input(remap->to_when_alone, UP);
     }
     return 1;
 }
@@ -185,10 +185,9 @@ int event_other_input(int virt_code, boolean key_up, DWORD time)
     struct Remap * remap = g_remap_list;
     while(remap) {
         if (remap->state == HELD_DOWN_ALONE) {
-            if (key_up || (time - remap->time < g_hold_delay)) {
+            if (!key_up && (g_hold_delay > 0) && (time - remap->time < g_hold_delay)) {
                 remap->state = TAP;
                 send_key_def_input(remap->to_when_alone, DOWN);
-                return 0;
             } else {
                 remap->state = HELD_DOWN_WITH_OTHER;
                 send_key_def_input(remap->to_with_other, DOWN);
@@ -205,20 +204,27 @@ int event_other_input(int virt_code, boolean key_up, DWORD time)
 /* @return swallow_input */
 int handle_input(int scan_code, int virt_code, int direction, DWORD time, DWORD flags, ULONG_PTR dwExtraInfo)
 {
-    int is_injected = dwExtraInfo == INJECTED_KEY_ID;
-    if (!is_injected) log_input(scan_code, virt_code, direction, flags, dwExtraInfo);
-    struct Remap * remap_for_input = find_remap_for_virt_code(virt_code);
+    struct Remap * remap_for_input;
 
-    if (!(LLKHF_INJECTED & flags)) {
-      if (remap_for_input) {
-        return (LLKHF_UP & flags) ?
-          event_remapped_key_up(remap_for_input, time) :
-          event_remapped_key_down(remap_for_input, time);
-      } else {
-        return event_other_input(virt_code, LLKHF_UP & flags, time);
-      }
+    if ((LLKHF_INJECTED & flags) && (dwExtraInfo != INJECTED_KEY_ID)) {
+        return 0;
     } else {
-      return 0;
+        if (LLKHF_INJECTED & flags) {
+            log_input(scan_code, virt_code, direction, flags, dwExtraInfo);
+            remap_for_input = NULL;
+        } else {
+            log_input(scan_code, virt_code, direction, flags, dwExtraInfo);
+            remap_for_input = find_remap_for_virt_code(virt_code);
+        }
+        if (remap_for_input) {
+            if (LLKHF_UP & flags) {
+                return event_remapped_key_up(remap_for_input, time);
+            } else {
+                return event_remapped_key_down(remap_for_input, time);
+            }
+        } else {
+            return event_other_input(virt_code, LLKHF_UP & flags, time);
+        }
     }
 }
 
